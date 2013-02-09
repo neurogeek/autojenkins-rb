@@ -1,0 +1,160 @@
+#!/usr/bin/env ruby
+
+$LOAD_PATH.unshift File.expand_path(File.join(File.dirname(__FILE__), "..", "lib"))
+require 'optparse'
+require 'autojenkins'
+
+URL=''
+AUTH={}
+TOKEN=""
+
+mJENK = AutoJenkins::Jenkins.new(URL, AUTH)
+###
+# Commands
+#
+module AutoJenkins
+    class Command
+        attr_accessor :jenk,
+                      :error,
+                      :errmsg
+    
+        def initialize(jenk)
+            @jenk = jenk
+            @error = 0
+            @errmsg = ""
+        end
+
+    end
+
+    class JobCommand < Command
+        def exec(hash)
+
+             jobs = @jenk.all_jobs()
+             
+             if not hash.key?(:jobname)
+
+                jobs.each do |n|
+                    puts "Name: #{n.name} -> Descr: #{n.get_description} -> URL: #{n.get_url}"
+                end
+
+             else
+                jobs.each do |n|
+                    if n.name == hash[:jobname]
+
+                        if hash.key?(:delete)
+                            n.delete()
+                        elsif hash.key?(:build)
+                            out = n.launch(hash[:token])
+                            if out
+                                puts "Lauch successful"
+                            else
+                                puts "Could not launch"
+                            end
+
+                            puts n.get_url
+                        else 
+                            puts n.get_config()
+                        end
+
+                        return
+                    end
+                end
+
+                @error = 2
+                @errmsg = "Job #{hash[:jobname]} not found"
+             end 
+        end
+    end
+end
+
+cCommands = {
+    "job" => AutoJenkins::JobCommand
+}
+
+# End Commands
+options = {:verbose => false,
+           :build => true,
+           :emails => "",
+           :auth => nil,
+           :token => ""}
+
+p = OptionParser.new do |opts|
+    opts.banner = "Usage: mjenk CMD [options]"
+
+    opts.on("-n", "--dont-run", "Do not run after creating the job") do
+        options[:build] = false
+    end
+
+    opts.on("-v", "--verbose", "Be verbose") do
+        options[:verbose] = true
+    end
+
+    opts.on("-h", "--url URL", String, "Jenkins URL") do |u|
+        URL = u
+    end
+
+    opts.on("-c", "--config-file URL", String, "Jenkins Configuration File") do |cf|
+        options[:auth] = cf
+    end
+
+    opts.on("-j", "--jobname JOBNAME", String, "Name of the job to retrieve") do |n|
+        options[:jobname] = n
+    end
+
+    opts.on("-d", "--delete", String, "Job: If -j is given, delete the job") do |d|
+        options[:delete] = true
+    end
+
+    opts.on("-B", "--build-job", String, "Job: Launches a new build on the given job") do |tst|
+        options[:tests] = tst
+    end
+
+end
+
+p.parse!(ARGV)
+
+if options[:auth] == nil
+    config = File.expand_path("~/.mjenk")
+else
+    config = options[:auth]
+end
+
+auth = AutoJenkins::Helpers.parseConfig(config)
+vCreds = [auth['USER'], auth['PASSWD']]
+vURL = auth['URL']
+
+if options[:token] == nil
+    # Wasn't overriden..
+
+    if auth.has_key?('TOKEN')
+        options[:token] = auth['TOKEN']
+    end
+end
+
+cCMD = nil
+mJENK = AutoJenkins::Jenkins.new(vURL, vCreds)
+
+# Lets process the CMD
+cCMD = "job"
+if ARGV.length > 0
+    cCMD = ARGV[0]
+end
+
+if cCommands.key?(cCMD)
+    cmd = cCommands[cCMD].new(mJENK)
+
+    begin
+        cmd.exec(options)
+    rescue AutoJenkins::ExUnauthorized => e1
+        puts e1.message
+        puts "Got an Unathorized error. Check your credentials."
+    rescue AutoJenkins::ExUndefined => e2
+        puts "Got an Undefined error. Maybe trying to build a disabled job?"
+        puts e2.message
+    end
+
+    if cmd.error != 0
+        puts cmd.errmsg
+        exit cmd.error
+    end
+end
