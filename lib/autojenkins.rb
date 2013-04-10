@@ -283,7 +283,7 @@ module AutoJenkins
         def all_jobs()
             ob_jobs = []
             jobs = Helpers._get_request(@jurl, 'LIST', [], @auth)
-
+	    jobs = JSON::parse(jobs)
             jobs['jobs'].each do |j|
                 ob_jobs << Job.new(j['name'], @jurl, @auth)
             end
